@@ -6,7 +6,7 @@ const app = express();
 
 app.use(express.json());
 
-app.use("/api/auth/user" , UserRouter)
+app.use("/api/v1/auth/user" , UserRouter)
 
 app.get('/' , (req , res) => {
     res.send("InfinoStore API is UP!!");
