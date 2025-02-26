@@ -1,7 +1,8 @@
 import { Request, Response } from "express";
 import { z } from "zod";
 import { UserModel } from "../models/User";
-import { encrypt } from "../utils/encrypt_decrypt";
+import { decrypt, encrypt } from "../utils/encrypt_decrypt";
+import { generateOTP, generateToken, sendOTPEmail } from "../utils/utils";
 
 // Input Validation VIA ZOD, Schema for the body for signup:
 const signupValidationSchema = z.object({
@@ -51,3 +52,67 @@ export const signup = async (req: Request, res: Response) => {
 
 
 }
+
+// In-memory storage for OTPs (replace with Redis or DB in production)
+const otpStore: Record<string, string> = {};
+
+export const signin = async (req: Request, res: Response) => {
+    const { email, password } = req.body;
+
+    try {
+        // Step 1: Check if the user exists
+        const user = await UserModel.findOne({ email });
+        if (!user) {
+            res.status(400).json({ message: 'Invalid email or password' });
+            return;
+        }
+
+        // Step 2: Verify the password
+        const decryptedPassword = decrypt(user.password);
+        if (!decryptedPassword) {
+            res.status(400).json({ message: 'Invalid email or password' });
+            return
+        }
+
+        // Step 3: Generate and send OTP
+        const otp = generateOTP();
+        otpStore[user._id.toString()] = otp; // Store OTP in memory
+        await sendOTPEmail(user.email, otp);
+
+        // Step 4: Respond with a message to enter OTP
+        res.status(200).json({ message: 'OTP sent to your email', userId: user._id });
+        return
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'Server error' });
+        return
+    }
+};
+
+// OTP Verification Endpoint
+export const verifyOTP = async (req: Request, res: Response) => {
+    const { userId, otp } = req.body;
+
+    try {
+        // Step 1: Check if the OTP matches
+        const storedOTP = otpStore[userId];
+        if (!storedOTP || storedOTP !== otp) {
+            res.status(400).json({ message: 'Invalid OTP' });
+            return;
+        }
+
+        // Step 2: Generate JWT token
+        const token = generateToken(userId);
+
+        // Step 3: Clear the OTP from memory
+        delete otpStore[userId];
+
+        // Step 4: Respond with the token
+        res.status(200).json({ token });
+        return
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'Server error' });
+        return
+    }
+};
